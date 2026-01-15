@@ -71,6 +71,7 @@ async function start() {
                 dateRegistration: Date.now(),
 
                 heroesBought: [],
+                lastShopUpdate: Date.now(),
                 shopId: null
             };
 

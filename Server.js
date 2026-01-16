@@ -72,7 +72,6 @@ async function start() {
 
                 heroesBought: [],
                 lastShopUpdate: 0,
-                shopId: null
             };
 
             const redisKey = `user:${userId}`;

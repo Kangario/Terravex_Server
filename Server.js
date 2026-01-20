@@ -64,7 +64,7 @@ async function start() {
                 userId,
                 username: `Player_${userId.slice(0, 6)}`,
                 level: 1,
-                gold: 100,
+                gold: 10000,
                 victories: 0,
                 defeats: 0,
                 rating: 0,

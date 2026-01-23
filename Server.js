@@ -2,6 +2,7 @@ const express = require("express");
 const { createClient } = require("redis");
 const { OAuth2Client } = require("google-auth-library");
 const { v4: uuidv4 } = require("uuid");
+require("dotenv").config();
 
 async function start() {
     const redis = createClient({
@@ -21,7 +22,7 @@ async function start() {
 
     const app = express();
     app.use(express.json());
-    
+
     app.post("/auth/google", async (req, res) => {
         const { idToken } = req.body;
 
@@ -30,24 +31,52 @@ async function start() {
         }
 
         try {
+            // 1. Проверяем токен у Google
             const ticket = await googleClient.verifyIdToken({
                 idToken,
-                audience: process.env.GOOGLE_CLIENT_ID,
+                audience: process.env.GOOGLE_CLIENT_ID, // WEB CLIENT ID
             });
 
             const payload = ticket.getPayload();
+
+            // 🔹 ЭТО ГЛАВНЫЙ ID ПОЛЬЗОВАТЕЛЯ В GOOGLE
             const googleUserId = payload.sub;
 
-            const redisKey = `google:user:${googleUserId}`;
+            // 2. Проверяем, есть ли уже такой пользователь
+            const linkKey = `google:link:${googleUserId}`;
+            let userId = await redis.get(linkKey);
 
-            await redis.set(
-                redisKey,
-                "1"
-            );
+            // 3. Если нет — создаём нового пользователя
+            if (!userId) {
+                userId = uuidv4();
 
+                const newUser = {
+                    userId,
+                    level: 1,
+                    gold: 10000,
+                    victories: 0,
+                    defeats: 0,
+                    rating: 0,
+                    dateRegistration: Date.now(),
+                    heroesBought: [],
+                    lastShopUpdate: 0,
+                };
+
+                // сохраняем профиль
+                await redis.set(`user:${userId}`, JSON.stringify(newUser));
+
+                // 🔥 сохраняем связь Google → UserId
+                await redis.set(linkKey, userId);
+
+                console.log("🆕 New user created:", userId);
+            } else {
+                console.log("✅ Existing user:", userId);
+            }
+
+            // 4. Возвращаем ТОЛЬКО твой userId
             res.json({
                 ok: true,
-                googleUserId,
+                userId,
             });
 
         } catch (err) {
@@ -55,6 +84,7 @@ async function start() {
             res.status(401).json({ error: "Invalid Google token" });
         }
     });
+
 
     app.post("/user/create", async (req, res) => {
         try {

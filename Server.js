@@ -26,11 +26,13 @@ async function start() {
     app.get("/auth/google", async (req, res) => {
         const code = req.query.code;
 
+        
         if (!code) {
             return res.status(400).send("Missing code");
         }
 
         try {
+            
             // 1. Обмениваем code → token у Google
             const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
                 method: "POST",
@@ -45,6 +47,8 @@ async function start() {
             });
 
             const tokenData = await tokenResponse.json();
+
+            console.log("🔴 TOKEN RESPONSE FULL:", tokenData);
 
             if (!tokenData.id_token) {
                 console.error("Token error:", tokenData);

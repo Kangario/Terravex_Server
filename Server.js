@@ -153,9 +153,10 @@ async function start() {
     });
 
 
-    app.listen(3000, () => {
-        console.log("🚀 Server started on port 3000");
+    app.listen(3000, "0.0.0.0", () => {
+        console.log("🚀 Server started on port 3000 on all interfaces");
     });
+
 }
 
 start();

@@ -23,35 +23,57 @@ async function start() {
     const app = express();
     app.use(express.json());
 
-    app.post("/auth/google", async (req, res) => {
-        const { idToken } = req.body;
+    app.get("/auth/google", async (req, res) => {
+        const code = req.query.code;
 
-        if (!idToken) {
-            return res.status(400).json({ error: "Missing idToken" });
+        if (!code) {
+            return res.status(400).send("Missing code");
         }
 
         try {
-            // 1. Проверяем токен у Google
+            // 1. Обмениваем code → token у Google
+            const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: new URLSearchParams({
+                    code,
+                    client_id: process.env.GOOGLE_CLIENT_ID,
+                    client_secret: process.env.GOOGLE_CLIENT_SECRET,
+                    redirect_uri: "https://terravex-server.onrender.com/auth/google",
+                    grant_type: "authorization_code",
+                }),
+            });
+
+            const tokenData = await tokenResponse.json();
+
+            if (!tokenData.id_token) {
+                console.error("Token error:", tokenData);
+                return res.status(401).send("Failed to get id_token");
+            }
+
+            // 2. Проверяем id_token
             const ticket = await googleClient.verifyIdToken({
-                idToken,
-                audience: process.env.GOOGLE_CLIENT_ID, // WEB CLIENT ID
+                idToken: tokenData.id_token,
+                audience: process.env.GOOGLE_CLIENT_ID,
             });
 
             const payload = ticket.getPayload();
 
-            // 🔹 ЭТО ГЛАВНЫЙ ID ПОЛЬЗОВАТЕЛЯ В GOOGLE
             const googleUserId = payload.sub;
+            const email = payload.email;
+            const name = payload.name;
 
-            // 2. Проверяем, есть ли уже такой пользователь
+            // 3. Проверяем / создаём пользователя
             const linkKey = `google:link:${googleUserId}`;
             let userId = await redis.get(linkKey);
 
-            // 3. Если нет — создаём нового пользователя
             if (!userId) {
                 userId = uuidv4();
 
                 const newUser = {
                     userId,
+                    email,
+                    name,
                     level: 1,
                     gold: 10000,
                     victories: 0,
@@ -62,28 +84,27 @@ async function start() {
                     lastShopUpdate: 0,
                 };
 
-                // сохраняем профиль
                 await redis.set(`user:${userId}`, JSON.stringify(newUser));
-
-                // 🔥 сохраняем связь Google → UserId
                 await redis.set(linkKey, userId);
 
-                console.log("🆕 New user created:", userId);
+                console.log("🆕 New Google user:", userId);
             } else {
-                console.log("✅ Existing user:", userId);
+                console.log("✅ Existing Google user:", userId);
             }
 
-            // 4. Возвращаем ТОЛЬКО твой userId
-            res.json({
-                ok: true,
-                userId,
-            });
+            // 4. Создаём сессию
+            const sessionToken = uuidv4();
+            await redis.set(`session:${sessionToken}`, userId, { EX: 60 * 60 * 24 * 7 }); // 7 дней
+
+            // 5. 🔥 РЕДИРЕКТ ОБРАТНО В ИГРУ
+            res.redirect(`terravex://login?session=${sessionToken}`);
 
         } catch (err) {
-            console.error("Auth error:", err);
-            res.status(401).json({ error: "Invalid Google token" });
+            console.error("Google auth error:", err);
+            res.status(500).send("Google auth failed");
         }
     });
+
 
 
     app.post("/user/create", async (req, res) => {

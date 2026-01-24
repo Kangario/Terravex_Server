@@ -26,13 +26,11 @@ async function start() {
     app.get("/auth/google", async (req, res) => {
         const code = req.query.code;
 
-        
         if (!code) {
             return res.status(400).send("Missing code");
         }
 
         try {
-            
             // 1. Обмениваем code → token у Google
             const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
                 method: "POST",
@@ -63,17 +61,15 @@ async function start() {
 
             const payload = ticket.getPayload();
 
-            const googleUserId = payload.sub;
+            // 👉 Используем Google sub КАК userId
+            const userId = payload.sub;
 
-            // 3. Проверяем / создаём пользователя
-            const linkKey = `google:link:${googleUserId}`;
-            let userId = await redis.get(linkKey);
+            // 3. Проверяем / создаём пользователя ТОЛЬКО по userId
+            let userData = await redis.get(`user:${userId}`);
 
-            if (!userId) {
-                userId = uuidv4();
-
+            if (!userData) {
                 const newUser = {
-                    userId,
+                    userId,          // = google sub
                     level: 1,
                     gold: 10000,
                     victories: 0,
@@ -85,27 +81,24 @@ async function start() {
                 };
 
                 await redis.set(`user:${userId}`, JSON.stringify(newUser));
-                await redis.set(linkKey, userId);
 
                 console.log("🆕 New Google user:", userId);
             } else {
                 console.log("✅ Existing Google user:", userId);
             }
 
-            // 4. Создаём сессию
-            const sessionToken = uuidv4();
-            await redis.set(`session:${sessionToken}`, userId, { EX: 60 * 60 * 24 * 7 }); // 7 дней
+            // ❌ НЕ создаём session token
+            // ❌ НЕ сохраняем google:link:*
+            // ❌ НЕ сохраняем session:*
 
-            // 5. 🔥 РЕДИРЕКТ ОБРАТНО В ИГРУ
-            res.redirect(`terravex://login?session=${sessionToken}`);
+            // 4. Редирект обратно в игру только с userId
+            res.redirect(`terravex://login?userId=${userId}`);
 
         } catch (err) {
             console.error("Google auth error:", err);
             res.status(500).send("Google auth failed");
         }
     });
-
-
 
     app.post("/user/create", async (req, res) => {
         try {

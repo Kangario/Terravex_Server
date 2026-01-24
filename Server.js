@@ -64,8 +64,6 @@ async function start() {
             const payload = ticket.getPayload();
 
             const googleUserId = payload.sub;
-            const email = payload.email;
-            const name = payload.name;
 
             // 3. Проверяем / создаём пользователя
             const linkKey = `google:link:${googleUserId}`;
@@ -76,8 +74,6 @@ async function start() {
 
                 const newUser = {
                     userId,
-                    email,
-                    name,
                     level: 1,
                     gold: 10000,
                     victories: 0,

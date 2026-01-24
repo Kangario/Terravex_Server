@@ -25,13 +25,14 @@ async function start() {
 
     app.get("/auth/google", async (req, res) => {
         const code = req.query.code;
+        const state = req.query.state; // AuthUID от игры
 
-        if (!code) {
-            return res.status(400).send("Missing code");
+        if (!code || !state) {
+            return res.status(400).send("Missing code or state");
         }
 
         try {
-            // 1. Обмениваем code → token у Google
+            // 1. code → token
             const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
                 method: "POST",
                 headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -46,30 +47,26 @@ async function start() {
 
             const tokenData = await tokenResponse.json();
 
-            console.log("🔴 TOKEN RESPONSE FULL:", tokenData);
-
             if (!tokenData.id_token) {
                 console.error("Token error:", tokenData);
                 return res.status(401).send("Failed to get id_token");
             }
 
-            // 2. Проверяем id_token
             const ticket = await googleClient.verifyIdToken({
                 idToken: tokenData.id_token,
                 audience: process.env.GOOGLE_CLIENT_ID,
             });
 
             const payload = ticket.getPayload();
+            const userId = payload.sub; // ← ТВОЙ ОСНОВНОЙ USER ID
 
-            // 👉 Используем Google sub КАК userId
-            const userId = payload.sub;
-
-            // 3. Проверяем / создаём пользователя ТОЛЬКО по userId
+            // 2. Создаём пользователя если нет
             let userData = await redis.get(`user:${userId}`);
 
             if (!userData) {
                 const newUser = {
-                    userId,          // = google sub
+                    userId,
+                    email: payload.email,
                     level: 1,
                     gold: 10000,
                     victories: 0,
@@ -81,24 +78,23 @@ async function start() {
                 };
 
                 await redis.set(`user:${userId}`, JSON.stringify(newUser));
-
                 console.log("🆕 New Google user:", userId);
             } else {
                 console.log("✅ Existing Google user:", userId);
             }
 
-            // ❌ НЕ создаём session token
-            // ❌ НЕ сохраняем google:link:*
-            // ❌ НЕ сохраняем session:*
+            // 3. 🔥 Связываем state → userId (на 2 минуты)
+            await redis.set(`auth:${state}`, userId, { EX: 120 });
 
-            // 4. Редирект обратно в игру только с userId
-            res.redirect(`terravex://login?userId=${userId}`);
+            // 4. 🔥 РЕДИРЕКТ ОБРАТНО В ИГРУ (ТОЛЬКО state)
+            res.redirect(`terravex://login?state=${state}`);
 
         } catch (err) {
             console.error("Google auth error:", err);
             res.status(500).send("Google auth failed");
         }
     });
+
 
     app.post("/user/create", async (req, res) => {
         try {
@@ -149,6 +145,26 @@ async function start() {
     app.listen(3000, "0.0.0.0", () => {
         console.log("🚀 Server started on port 3000 on all interfaces");
     });
+    
+    app.post("/auth/result", async (req, res) => {
+        const { state } = req.body;
+
+        if (!state) {
+            return res.status(400).json({ error: "Missing state" });
+        }
+
+        const userId = await redis.get(`auth:${state}`);
+
+        if (!userId) {
+            return res.status(404).json({ error: "Not ready" });
+        }
+
+        // Одноразово
+        await redis.del(`auth:${state}`);
+
+        res.json({ userId });
+    });
+
 
 }
 

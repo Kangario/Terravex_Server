@@ -5,23 +5,40 @@ const { v4: uuidv4 } = require("uuid");
 require("dotenv").config();
 
 async function start() {
+    const port = Number(process.env.PORT) || 8080;
+    let redisReady = false;
+
     const redis = createClient({
         socket: {
-            host: "redis-17419.c328.europe-west3-1.gce.cloud.redislabs.com",
-            port: 17419,
+            host: process.env.REDIS_HOST || "redis-17419.c328.europe-west3-1.gce.cloud.redislabs.com",
+            port: Number(process.env.REDIS_PORT) || 17419,
         },
-        password: "af0gO9r23iS9w7sYd8T0XtQktQR0ZXnl",
+        password: process.env.REDIS_PASSWORD || "af0gO9r23iS9w7sYd8T0XtQktQR0ZXnl",
     });
 
     redis.on("error", (err) => console.error("Redis error:", err));
-    await redis.connect();
-
-    console.log("✅ Redis connected");
 
     const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
     const app = express();
     app.use(express.json());
+
+    app.get("/health", (req, res) => {
+        res.status(200).json({
+            ok: true,
+            redisReady,
+        });
+    });
+
+    app.use((req, res, next) => {
+        if (!redisReady && req.path !== "/health") {
+            return res.status(503).json({
+                error: "Service is starting, Redis is not ready yet",
+            });
+        }
+
+        next();
+    });
 
     app.get("/auth/google", async (req, res) => {
         const code = req.query.code;
@@ -40,7 +57,7 @@ async function start() {
                     code,
                     client_id: process.env.GOOGLE_CLIENT_ID,
                     client_secret: process.env.GOOGLE_CLIENT_SECRET,
-                    redirect_uri: "https://terravex-server.onrender.com/auth/google",
+                    redirect_uri: process.env.GOOGLE_REDIRECT_URI || "https://terravex-server.onrender.com/auth/google",
                     grant_type: "authorization_code",
                 }),
             });
@@ -142,8 +159,8 @@ async function start() {
     });
 
 
-    app.listen(3000, "0.0.0.0", () => {
-        console.log("🚀 Server started on port 3000 on all interfaces");
+    app.listen(port, "0.0.0.0", () => {
+        console.log(`Server started on port ${port} on all interfaces`);
     });
     
     app.post("/auth/result", async (req, res) => {
@@ -165,7 +182,16 @@ async function start() {
         res.json({ userId });
     });
 
-
+    try {
+        await redis.connect();
+        redisReady = true;
+        console.log("Redis connected");
+    } catch (err) {
+        console.error("Redis connect failed during startup:", err);
+    }
 }
 
-start();
+start().catch((err) => {
+    console.error("Fatal startup error:", err);
+    process.exit(1);
+});
